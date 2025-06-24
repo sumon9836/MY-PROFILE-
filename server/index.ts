@@ -1,78 +1,71 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
-
-// Middleware to parse JSON and form data
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Request logger for /api routes
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: any;
+  let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
-  const originalResJson = res.json.bind(res);
-  res.json = (body: any, ...args: any[]) => {
-    capturedJsonResponse = body;
-    return originalResJson(body, ...args);
+  const originalResJson = res.json;
+  res.json = function (bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
   res.on("finish", () => {
-    if (!path.startsWith("/api")) return;
     const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
 
-    let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-    if (capturedJsonResponse) {
-      logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-    }
-    if (logLine.length > 80) {
-      logLine = logLine.slice(0, 79) + "…";
-    }
+      if (logLine.length > 80) {
+        logLine = logLine.slice(0, 79) + "…";
+      }
 
-    log(logLine);
+      log(logLine);
+    }
   });
 
   next();
 });
 
 (async () => {
-  try {
-    // Register API or other routes
-    const server = await registerRoutes(app);
+  const server = await registerRoutes(app);
 
-    // Global error handler
-    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      const status = err.status || err.statusCode || 500;
-      const message = err.message || "Internal Server Error";
-      res.status(status).json({ message });
-      log(`❌ Error ${status}: ${message}`);
-    });
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
 
-    // Vite dev server or serve static build
-    if (app.get("env") === "development") {
-      await setupVite(app, server);
-    } else {
-      serveStatic(app);
-    }
+    res.status(status).json({ message });
+    throw err;
+  });
 
-    // Use PORT from env or fallback to 5000 (good for Vercel, Docker, Railway)
-    const port = Number(process.env.PORT) || 5000;
-
-    server.listen(
-      {
-        port,
-        host: "0.0.0.0",
-        reusePort: true,
-      },
-      () => {
-        log(`✅ Server is running on http://localhost:${port}`);
-      }
-    );
-  } catch (err) {
-    console.error("Server startup failed:", err);
-    process.exit(1); // fail gracefully
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (app.get("env") === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
   }
+
+  // ALWAYS serve the app on port 5000
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+  
+  const port = process.env.PORT || 5000;
+  server.listen({
+    port,
+    host: "0.0.0.0",
+    reusePort: true,
+  }, () => {
+    log(`serving on port ${port}`);
+  });
 })();
