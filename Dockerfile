@@ -15,4 +15,4 @@ COPY . .
 RUN npm run build
 
 # Start the server
-CMD ["node", "server/index.js"]
+CMD ["node", "server/index.ts"]
