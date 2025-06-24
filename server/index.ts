@@ -61,11 +61,12 @@ app.use((req, res, next) => {
   // It is the only port that is not firewalled.
   
   const port = process.env.PORT || 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+
+// Example route
+app.get('/api', (req, res) => {
+  res.send('Hello from Vercel Server!');
+});
+
+// ✅ Export the app — no `.listen()` here!
+module.exports = app;
 })();
